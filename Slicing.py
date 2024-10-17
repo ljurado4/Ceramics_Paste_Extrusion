@@ -7,13 +7,96 @@ import numpy as np
 from scipy.spatial import ConvexHull
 import random
 
+'''class MyMesh(mesh.Mesh):
+    @property
+    def original_vectors(self):
+        return super().vectors
+
+    @property
+    def modified_vectors(self):
+        # Implement your logic to modify original vectors here
+        # For example, return a modified version of original_vectors
+        return {vector[i][2]: vector * 2 for vector in self.original_vectors}  # Just an example modification
+  '''  
 
 class Slicer_backend:
 
     def read_file_show(filepath):
+        solid_body = mesh.Mesh.from_file(filepath)
         file = pv.read(filepath)
-        return file, file.plot()
+        return solid_body, file.plot()
 
+    def get_points_per_slice(solid_body):
+        boundry = []
+        for triangles in solid_body.vectors:
+            for points in triangles:
+                if points[2] <= 0.8:
+                   #this triangle is in layer keep move to next
+                   # only need x and y data 
+                   if [points[0],points[1]] not in boundry:
+                        boundry.append([points[0],points[1]]) 
+        return boundry
+
+def random_start(perimeter, prevPoint = None):
+    pointList = [(i, j) for i, j in perimeter]
+    index = 0
+    if prevPoint == None:
+        return (0, pointList[0])
+    else:
+        if index > 0:
+            index -= len(pointList) / 2
+            return (index, pointList[index])            
+        else:
+            index += len(pointList) / 2
+            return (index, pointList[index])
+        
+def convert_to_gcode(points):
+    gcode_commands = []
+    gcode_commands.append("G21 ; Set units to millimeters")
+    gcode_commands.append("G90 ; Use absolute positioning")
+    gcode_commands.append("G1 F1500 ; Set feedrate")
+
+    for point in points:
+        (x_start, y_start) = point
+        gcode_commands.append(f"G1 X{x_start:.4f} Y{y_start:.4f}")  # Move to start point
+
+    return gcode_commands
+
+
+if __name__ == "__main__":
+    # Load the 3D object and visualize it
+    object, visualization = Slicer_backend.read_file_show(filepath=r"C:\Users\zzcro\Desktop\Lab_Assignments\Keck\TestCylinder.stl")
+    points = Slicer_backend.get_points_per_slice(object)
+    points.append(points[0])
+    plt.figure()
+    startPoint = random_start(points, None)
+    gCodePath = points
+    xPoints = [point[0] for point in points]
+    yPoints = [point[1] for point in points]
+    plt.scatter(xPoints, yPoints, c='blue')
+    plt.plot(xPoints, yPoints)
+    plt.scatter(startPoint[1][0], startPoint[1][1], c='red')
+    
+        #print('X' + str(points[i][0]) +' Y' + str(points[i][1]))
+    ''' 
+    1.5 Milimeter or 0.8 Milimeter Extrusion Diameter
+    0.4 Milimeter Height
+    '''
+    g_commands = convert_to_gcode(gCodePath) 
+    output_file_path = "/Users/zzcro/Desktop/Lab_Assignments/Keck/generated.gcode"
+    with open(output_file_path, "w") as gcode_file:
+        for command in g_commands:
+             gcode_file.write(command + "\n")
+     
+    plt.gca().set_aspect('equal', adjustable='box')
+    plt.grid(True)
+    plt.show()
+    
+    
+    
+    
+    
+    ''' Archived Work
     def slicing_object(obj, layer_height):
         minz = maxz = None
         for p in obj.points:
@@ -33,19 +116,7 @@ class Slicer_backend:
 
         slices = obj.slice_along_axis(n=num_slices, axis="z")
         return slices
-
-    def get_points_per_slice(slices):
-        points_per_slice = []
-
-        for slice_obj in slices:
-            points = slice_obj.points
-            xpoints = points[:, 0]
-            ypoints = points[:, 1]
-
-            points_per_slice.append((xpoints, ypoints))
-
-        return points_per_slice
-
+    
     def clockwise_sort(points):
         sortedpoints = []
         for i in range(len(points)):
@@ -186,66 +257,44 @@ class Slicer_backend:
             layers.append(new_layer)
 
         return layers
-
-def random_start(perimeter, prevPoint = None):
-    pointList = [(str(i), str(j)) for i, j in perimeter]
-    index = 0
-    if prevPoint == None:
-        index = random.randint(0, len(pointList) - 1)
-        return (index, pointList[index])
-    else:
-        if index > 0:
-            index -= len(pointList) / 2
-            return (index, pointList[index])            
-        else:
-            index += len(pointList) / 2
-            return (index, pointList[index])
-
-
-if __name__ == "__main__":
-    # Load the 3D object and visualize it
-    object, visualization = Slicer_backend.read_file_show(filepath=r"C:\Users\zzcro\Desktop\Lab_Assignments\Keck\TestSTL v1.stl")
-
+    
     # Slice the object into layers
-    slices = Slicer_backend.slicing_object(object, layer_height=1)
+    #slices = Slicer_backend.slicing_object(object, layer_height=1)
 
     # Get the points from each slice
-    points = Slicer_backend.get_points_per_slice(slices)
-
     # Sort points clockwise
-    sortedpoints = Slicer_backend.clockwise_sort(points)
+    #sortedpoints = Slicer_backend.clockwise_sort(points)
 
     # Find the outer and inner perimeters
-    outer_perimeters, inner_perimeters = Slicer_backend.find_outer_inner_perimeters(sortedpoints)
-
+    #outer_perimeters, inner_perimeters = Slicer_backend.find_outer_inner_perimeters(sortedpoints)
+    
+    
     # Generate additional points along the outer perimeter of the first slice
-    sorted_first_slice_gen_o = Slicer_backend.generate_points(outer_perimeters[0], dist_b_points=0.1)
+    #sorted_first_slice_gen_o = Slicer_backend.generate_points(outer_perimeters[0], dist_b_points=2)
 
     #layers = Slicer_backend.generate_inward_steps(sorted_first_slice_gen_o, 0.5)
 
     # Plot the results for the first slice
-    plt.figure()
-    outer_x, outer_y = zip(*outer_perimeters[0])
-    x_1_slice, y_1_slice = zip(*sorted_first_slice_gen_o)
-    plt.scatter(x_1_slice, y_1_slice)
-    print(x_1_slice)
-    plt.scatter(outer_x, outer_y)
-    startPoint = random_start(outer_perimeters[0])
-    plt.scatter(float(startPoint[1][0]), float(startPoint[1][1]), linewidths=5)
-    f = open("pointData.txt", "w")
-    f.write("Perimeter Points:\n\n")
-    for i in range(len(outer_x)):
-        f.write("Point " + str((i + 1)) + ": \n (" + str(outer_x[i]) + ", " + str(outer_y[i]) + ")\n\n")
-    f.write("Generated Points:\n\n")
-    for i in range(len(x_1_slice)):
-        f.write("Point " + str((i + 1)) + ": \n (" + str(x_1_slice[i]) + ", " + str(y_1_slice[i]) + ")\n\n")
-    f.close()
+    #outer_x, outer_y = zip(*outer_perimeters[0])
+    #x_1_slice, y_1_slice = zip(*sorted_first_slice_gen_o)
+    #inner_x, inner_y = zip(*inner_perimeters[0])
+    #plt.scatter(points[0], points[1])
+    #plt.scatter(x_1_slice, y_1_slice)
+    #print(x_1_slice)
+    #plt.scatter(outer_x, outer_y)
+    #startPoint = random_start(outer_perimeters[0])
+    #plt.scatter(float(startPoint[1][0]), float(startPoint[1][1]), linewidths=5)
+    
+    #sortedpoints = Slicer_backend.clockwise_sort(inner_perimeters)
+    #outer_perimeters, inner_perimeters = Slicer_backend.find_outer_inner_perimeters(inner_perimeters)
+    #outer_x, outer_y = zip(*outer_perimeters[0])
+    #plt.scatter(outer_x, outer_y)
+    
+    
+   
 
     #plt.figure()
     #for layer in layers:
     #    x, y = zip(*layer)
     #    plt.plot(x, y, marker='o')
-
-    plt.gca().set_aspect('equal', adjustable='box')
-    plt.grid(True)
-    plt.show()
+    '''
