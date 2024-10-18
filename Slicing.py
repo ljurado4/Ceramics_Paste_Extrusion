@@ -7,18 +7,6 @@ import numpy as np
 from scipy.spatial import ConvexHull
 import random
 
-'''class MyMesh(mesh.Mesh):
-    @property
-    def original_vectors(self):
-        return super().vectors
-
-    @property
-    def modified_vectors(self):
-        # Implement your logic to modify original vectors here
-        # For example, return a modified version of original_vectors
-        return {vector[i][2]: vector * 2 for vector in self.original_vectors}  # Just an example modification
-  '''  
-
 class Slicer_backend:
 
     def read_file_show(filepath):
