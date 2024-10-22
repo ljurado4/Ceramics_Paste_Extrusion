@@ -145,7 +145,9 @@ def main(filepath, infill_type):
     gcode_commands = convert_to_gcode(points)
     
     # Write the generated G-code commands to a file
-    output_file_path = "/Users/zzcro/Desktop/Lab_Assignments/Keck/generated.gcode"
+    # output_file_path = "/Users/zzcro/Desktop/Lab_Assignments/Keck/generated.gcode"
+    output_file_path = "/Users/lizbethjurado/Keck/STL/GCODE/generated.gcode"
+    
     with open(output_file_path, "w") as gcode_file:
         for command in gcode_commands:
             gcode_file.write(command + "\n")
@@ -171,6 +173,7 @@ def main(filepath, infill_type):
 
 if __name__ == "__main__":
     # Set the file path and ask the user to select the infill type
-    filepath = r"C:\Users\zzcro\Desktop\Lab_Assignments\Keck\TestCylinder.stl"
+    #filepath = r"C:\Users\zzcro\Desktop\Lab_Assignments\Keck\TestCylinder.stl"
+    filepath = '/Users/lizbethjurado/Keck/STL/0.5in cube 1.STL'
     infill_type = input("Select infill type (linear, cross_hatching, radial): ")
     main(filepath, infill_type)
