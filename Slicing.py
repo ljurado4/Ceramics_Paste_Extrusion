@@ -166,13 +166,13 @@ def main(filepath, infill_type):
     
     slice_points = SlicerBackend.get_points_per_slice(solid_body, z_height=0.8)
     
-    if infill_type == "linear":
+    if infill_type == "1" or infill_type.lower() == "a":
         points = InfillPatterns.linear_infill(canvas_size=(200, 200), line_spacing=0.5)
-    elif infill_type == "cross_hatching":
+    elif infill_type == "2" or infill_type.lower() == "b":
         points = InfillPatterns.cross_hatching_infill(canvas_size=(200, 200), line_length=100, num_lines=10)
-    elif infill_type == "radial":
+    elif infill_type == "3" or infill_type.lower() == "c":
         points = InfillPatterns.radial_infill_square(slice_points, p_width=0.8)
-    elif infill_type == "adaptive_spiral":
+    elif infill_type == "4" or infill_type.lower() == "d":
         points = InfillPatterns.adaptive_spiral_infill(slice_points, step_length=0.25)
     else:
         raise ValueError("Invalid infill type selected.")
@@ -186,7 +186,7 @@ def main(filepath, infill_type):
             gcode_file.write(command + "\n")
     
     plt.figure()
-    if infill_type in ["cross_hatching", "linear"]:
+    if infill_type in ["2", "b", "B", "1", "a", "A"]:
         for line in points:
             (x_start, y_start), (x_end, y_end) = line
             plt.plot([x_start, x_end], [y_start, y_end], marker='o')
@@ -207,5 +207,10 @@ def main(filepath, infill_type):
 
 if __name__ == "__main__":
     filepath = '/Users/lizbethjurado/Keck/STL/0.5in cube 1.STL'
-    infill_type = input("Select infill type (linear, cross_hatching, radial, adaptive_spiral): ")
+    print("Select infill type:")
+    print("1 or A - Linear Infill")
+    print("2 or B - Cross Hatching Infill")
+    print("3 or C - Radial Infill")
+    print("4 or D - Adaptive Spiral Infill")
+    infill_type = input("Enter your choice: ")
     main(filepath, infill_type)
