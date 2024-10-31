@@ -37,7 +37,6 @@ class InfillPatterns:
     @staticmethod
     def linear_infill(canvas_size, line_spacing):
         # Generate a zigzag linear infill pattern across the square shape
-        
         x_min, y_min = 0, 0
         x_max, y_max = canvas_size[0], canvas_size[1]
         
@@ -61,7 +60,6 @@ class InfillPatterns:
     @staticmethod
     def cross_hatching_infill(canvas_size, line_length, num_lines):
         # Generate cross-hatching pattern for infill
-
         def generate_random_start_point(canvas_size):
             x = random.uniform(0, canvas_size[0])
             y = random.uniform(0, canvas_size[1])
@@ -83,49 +81,35 @@ class InfillPatterns:
         return lines
 
     @staticmethod
-    def radial_infill(points, step_length):
-        # Generate radial infill by shrinking layers inward step by step
-
-        # Calculate the Convex Hull to get the outermost boundary
-        hull = ConvexHull(points)
-        boundary_points = [points[i] for i in hull.vertices]
-
-        # Calculate the approximate center point
-        center_x = np.mean([x for x, y in boundary_points])
-        center_y = np.mean([y for x, y in boundary_points])
+    def radial_infill_square(points, p_width=0.8):
+        # Assume the points define a square or rectangular outer boundary.
         
-        # Initialize the radial infill layers
-        layers = [boundary_points]
+        # Calculate the bounding box (min and max x and y) of the points to get initial square dimensions.
+        x_coords, y_coords = zip(*points)
+        x_min, x_max = min(x_coords), max(x_coords)
+        y_min, y_max = min(y_coords), max(y_coords)
         
-        while True:
-            new_layer = []
-            for x, y in layers[-1]:
-                # Calculate the direction vector towards the center
-                direction_x = center_x - x
-                direction_y = center_y - y
-                distance = np.sqrt(direction_x ** 2 + direction_y ** 2)
-                
-                # Stop if points are close to the center
-                if distance < step_length:
-                    continue
-
-                # Normalize the direction vector
-                norm_x = direction_x / distance
-                norm_y = direction_y / distance
-
-                # Move each point inward by step_length
-                new_x = x + norm_x * step_length
-                new_y = y + norm_y * step_length
-                new_layer.append((new_x, new_y))
-
-            # If not enough points for a new boundary, stop
-            if len(new_layer) < 3:
-                break
+        # List to store each inward square layer.
+        layers = []
+        
+        # Generate inward squares until they collapse to the center.
+        while (x_max - x_min > p_width * 2) and (y_max - y_min > p_width * 2):
+            # Define the current layer as a square with corners based on min/max x and y.
+            layer = [
+                (x_min, y_min),  # Bottom-left corner
+                (x_max, y_min),  # Bottom-right corner
+                (x_max, y_max),  # Top-right corner
+                (x_min, y_max),  # Top-left corner
+                (x_min, y_min)   # Close the square by returning to bottom-left
+            ]
+            layers.append(layer)
             
-            # Use Convex Hull to maintain the shape for the new layer
-            hull_layer = ConvexHull(new_layer)
-            layers.append([new_layer[i] for i in hull_layer.vertices])
-
+            # Move inward by the print width (p_width).
+            x_min += p_width
+            x_max -= p_width
+            y_min += p_width
+            y_max -= p_width
+        
         return layers
 
     @staticmethod
@@ -187,7 +171,7 @@ def main(filepath, infill_type):
     elif infill_type == "cross_hatching":
         points = InfillPatterns.cross_hatching_infill(canvas_size=(200, 200), line_length=100, num_lines=10)
     elif infill_type == "radial":
-        points = InfillPatterns.radial_infill(slice_points, step_length=0.25)
+        points = InfillPatterns.radial_infill_square(slice_points, p_width=0.8)
     elif infill_type == "adaptive_spiral":
         points = InfillPatterns.adaptive_spiral_infill(slice_points, step_length=0.25)
     else:
