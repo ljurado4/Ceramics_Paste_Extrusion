@@ -1,8 +1,7 @@
 import matplotlib.pyplot as plt
-import math
+import numpy as np
 import pyvista as pv
 from stl import mesh
-import numpy as np
 from scipy.spatial import ConvexHull
 import random
 
@@ -69,41 +68,46 @@ class InfillPatterns:
 
     @staticmethod
     def radial_infill(points, step_length):
-        # Generate radial infill, shrinking layers inward step by step
+        # Generate radial infill by shrinking layers inward step by step
 
-        # Calculate the center point of the outermost layer
+        # Calculate the approximate center point of the shape
         center_x = sum(x for x, y in points) / len(points)
         center_y = sum(y for x, y in points) / len(points)
         center = (center_x, center_y)
-
-        # Create layers moving inward from the outer perimeter
-        layers = [points]
+        
+        # Initialize the outer boundary using Convex Hull to handle various shapes
+        hull = ConvexHull(points)
+        boundary_points = [points[i] for i in hull.vertices]
+        
+        # Initialize with the outer boundary
+        layers = [boundary_points]
+        
         while True:
             new_layer = []
             for x, y in layers[-1]:
-                # Find direction vector towards the center
+                # Calculate the direction vector to the center
                 direction_x = center_x - x
                 direction_y = center_y - y
                 distance = np.sqrt(direction_x ** 2 + direction_y ** 2)
-                if distance == 0:
+                
+                if distance < step_length:  # Stop when points reach near the center
                     continue
 
-                # Move the point inward
+                # Normalize the direction vector
                 norm_direction_x = direction_x / distance
                 norm_direction_y = direction_y / distance
 
+                # Move each point inward by step_length
                 new_x = x + norm_direction_x * step_length
                 new_y = y + norm_direction_y * step_length
-
-                # Stop if the point reaches the center
-                if distance < step_length:
-                    continue
                 new_layer.append((new_x, new_y))
 
-            # Stop when no more points can be created
-            if not new_layer:
+            if len(new_layer) < 3:  # Stop if not enough points to form a closed loop
                 break
-            layers.append(new_layer)
+
+            # Use Convex Hull on the new layer to maintain the boundary shape
+            hull_layer = ConvexHull(new_layer)
+            layers.append([new_layer[i] for i in hull_layer.vertices])
 
         return layers
 
@@ -145,7 +149,6 @@ def main(filepath, infill_type):
     gcode_commands = convert_to_gcode(points)
     
     # Write the generated G-code commands to a file
-    # output_file_path = "/Users/zzcro/Desktop/Lab_Assignments/Keck/generated.gcode"
     output_file_path = "/Users/lizbethjurado/Keck/STL/GCODE/generated.gcode"
     
     with open(output_file_path, "w") as gcode_file:
@@ -161,10 +164,11 @@ def main(filepath, infill_type):
             plt.plot([x_start, x_end], [y_start, y_end], marker='o')
     else:
         # Default case for scatter plot of points
-        xPoints = [point[0] for point in points]
-        yPoints = [point[1] for point in points]
-        plt.scatter(xPoints, yPoints, c='blue')
-        plt.plot(xPoints, yPoints)
+        for layer in points:
+            xPoints = [point[0] for point in layer]
+            yPoints = [point[1] for point in layer]
+            plt.scatter(xPoints, yPoints, c='blue')
+            plt.plot(xPoints, yPoints)
     
     # Ensure equal aspect ratio and display the grid
     plt.gca().set_aspect('equal', adjustable='box')
@@ -173,7 +177,6 @@ def main(filepath, infill_type):
 
 if __name__ == "__main__":
     # Set the file path and ask the user to select the infill type
-    #filepath = r"C:\Users\zzcro\Desktop\Lab_Assignments\Keck\TestCylinder.stl"
     filepath = '/Users/lizbethjurado/Keck/STL/0.5in cube 1.STL'
     infill_type = input("Select infill type (linear, cross_hatching, radial): ")
     main(filepath, infill_type)
