@@ -17,18 +17,23 @@ Implement a slicing functionality for 3D models, particularly STL files, by gene
 
 
 ### Features
-### `slicing.py`
+### 'slicing_infill.py'
 - **File Reading**: Processes STL files to extract 3D geometry.
 - **View Generation**: Renders a viewing window to display the 3D figure.
 - **Object Slicing**:
-  - Identifies perimeter vertices of the object in a clockwise direction.
-  - Generates points between these vertices based on an offset.
-  - Determines starting points per layer and records points in tuple form (x, y) in the generation order.
-- **Future Enhancements**:
-  - Handle perimeter points of complex geometries.
-  - Add support for infill methods (radial and crosshatching).
-  - Improve starting point logic and enhance file input handling and GUI.
+   - Identifies perimeter vertices of the object in a clockwise direction.
+   - Generates points between these vertices based on an offset.
+   - Determines starting points per layer and records points in tuple form (x, y) in the generation order.
 
+- **Infill Patterns**: Added support for multiple infill patterns with selection via character or number input:
+   - 1 or A - Linear Infill: Creates a continuous, snake-like zigzag pattern that moves back and forth across the layer. Ideal for simple shapes and quick printing.
+   - 2 or B - Cross Hatching Infill: Generates a cross-hatching effect with alternating lines for improved strength and rigidity.
+   - 3 or C - Radial Infill: Fills the layer from the outer perimeter inward, creating a concentric pattern that distributes stress evenly.
+   - 4 or D - Adaptive Spiral Infill: Draws a smooth, continuous inward spiral, adjusting to the shape’s boundary and providing consistent material distribution for complex shapes.
+
+- **Future Enhancements**:
+Improve starting point logic for complex geometries.
+Enhance file input handling and develop a GUI for easier selection of infill patterns and slicing parameters
 
 
 ## Branching Guidelines
