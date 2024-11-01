@@ -17,7 +17,7 @@ Implement a slicing functionality for 3D models, particularly STL files, by gene
 
 
 ### Features
-### 'slicing_infill.py'
+### `slicing_infill.py`
 - **File Reading**: Processes STL files to extract 3D geometry.
 - **View Generation**: Renders a viewing window to display the 3D figure.
 - **Object Slicing**:
