@@ -36,7 +36,7 @@ class Slicer_backend:
         return sorted_boundary.tolist()  # Convert back to list
 
     @staticmethod
-    def scale_shape_down(perimeter_points, offset_distance=0.4):
+    def scale_shape_down(perimeter_points, offset_distance=0.8):
         # Create a polygon from the perimeter points
         polygon = Polygon(perimeter_points)
 
@@ -137,38 +137,46 @@ def random_start(perimeter, prevPoint = None):
             index += len(pointList) / 2
             return (index, pointList[index])
     
-def convert_to_gcode(points, nVal = 10, g_commands = [], prevP = 0):
-    Dn = 0.84  # mm diameter of nozzle
+def convert_to_gcode(points):
+    #Dn = 0.84   mm diameter of nozzle
+    #U = 10   mm/s print speed
     H = 0.4  # mm standoff distance
     W = 0.84  # desired width
-    U = 10  # mm/s print speed
     Ext_mult = 1
+    Pvalue = 0
+    Nval = 0
+    g_commands = []
     
     A_bead = H * W - (H**2 * (1 - (np.pi / 4)))
     
     for i in range(len(points)):
         point = points[i]
-        if point not in g_commands:
-            (x_start, y_start) = point
-            if len(g_commands) == 0:
-                g_commands.append(f"N0 G0 X{x_start:.4f} Y{y_start:.4f}")
-                continue
+        (x_start, y_start) = point
+        if len(g_commands) == 0:
+            g_commands = ["G21 ; Set units to millimeters", "G90 ; Use absolute positioning", "G1 F1500 ; Set feedrate"]
+            g_commands.append(f"N0 G0 X{x_start:.4f} Y{y_start:.4f}")
+            Nval += 10
+            continue
+        if f"G1 X{x_start:.4f} Y{y_start:.4f}" not in g_commands[-1] and f"G0 X{x_start:.4f} Y{y_start:.4f}" not in g_commands[-1]:
             start_point = np.array(points[i-1])
             end_point = np.array(point)
             E_distance = np.linalg.norm(end_point - start_point)
             if len(points) > 1:
-                Pvalue = A_bead * E_distance * Ext_mult + prevP
-                g_commands.append(f"N{nVal} G1 X{x_start:.4f} Y{y_start:.4f} P{Pvalue}")
-                prevP = Pvalue
-                nVal += 10
+                Pvalue = A_bead * E_distance * Ext_mult + Pvalue
+                if E_distance < (W / 2) + .16:
+                    g_commands.append(f"N{Nval} G0 X{x_start:.4f} Y{y_start:.4f}")
+                    Nval += 10
+                    continue
+                g_commands.append(f"N{Nval} G1 X{x_start:.4f} Y{y_start:.4f} P{Pvalue}")
+                Nval += 10
 
-    return g_commands, prevP, nVal
+    return g_commands
 
 if __name__ == "__main__":
     # Load the 3D object and visualize it
     line_length = 100  # Length of the lines
     number_of_lines = 10  # Number of lines to generate
-    object, visualization = Slicer_backend.read_file_show(filepath=r"C:\Users\zzcro\Desktop\Lab_Assignments\Keck\TwentyMMcube.stl")
+    object, visualization = Slicer_backend.read_file_show(filepath=r"C:\Users\zzcro\Desktop\Lab_Assignments\Keck\Ceramics_Paste_Extrusion\TwentyMMcube.stl")
     points= Slicer_backend.get_points_per_slice(object)
     #print(len(points))
     
@@ -180,8 +188,6 @@ if __name__ == "__main__":
     
     points.append(points[0])
     
-    gCodePath = points
-    g_commands, Pvalue, nVal = convert_to_gcode(gCodePath) 
     
     xPoints = [point[0] for point in points]
     yPoints = [point[1] for point in points]
@@ -196,25 +202,25 @@ if __name__ == "__main__":
     plt.plot(xPoints, yPoints)
     plt.plot((startPoint[1][0], xInfillPoints[0]), (startPoint[1][1], yInfillPoints[0]))
     
+    points.append(infillPoints[0])
+     
     
     plt.scatter(xInfillPoints, yInfillPoints, c= 'black')
     lines = generate_lines(infillPoints)
     for i in range(len(lines)):
         line = lines[i]
         [(start_x, start_y), (end_x, end_y)] = line
-        plt.plot((start_x, end_x), (start_y, end_y)) 
+
         if i % 2 == 0:
-            if start_x != 0.4:
+            if start_x != 0.8:
                 start_x, end_x = end_x, start_x
                 start_y, end_y = end_y, start_y
         else:
-            if start_x != 19.6:
+            if start_x != 19.2:
                 start_x, end_x = end_x, start_x
                 start_y, end_y = end_y, start_y
-        g_commands, Pvalue, nVal = convert_to_gcode([(start_x, start_y), (end_x, end_y)], nVal, g_commands, Pvalue)
-    
-    for line in lines:
-        [(start_x, start_y), (end_x, end_y)] = line
+        points.extend([(start_x, start_y)])
+        points.extend([(end_x, end_y)])
         plt.plot((start_x, end_x), (start_y, end_y)) 
     
     perp_lines = generate_perp_lines(infillPoints)
@@ -222,13 +228,14 @@ if __name__ == "__main__":
         [(start_x, start_y), (end_x, end_y)] = perp_line
         plt.plot((start_x, end_x), (start_y, end_y))    
     
-    
+    gCodePath = points
+    g_commands = convert_to_gcode(gCodePath)
     
     ''' 
     1.5 Milimeter or 0.8 Milimeter Extrusion Diameter
     0.4 Milimeter Height
     '''
-    output_file_path = "/Users/zzcro/Desktop/Lab_Assignments/Keck/generated.gcode"
+    output_file_path = "/Users/zzcro/Desktop/Lab_Assignments/Keck/Ceramics_Paste_Extrusion/generated.gcode"
     with open(output_file_path, "w") as gcode_file:
         for command in g_commands:
             gcode_file.write(command + "\n")
