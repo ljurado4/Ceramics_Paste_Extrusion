@@ -4,6 +4,7 @@ import pyvista as pv
 from stl import mesh
 from scipy.spatial import ConvexHull
 import random
+import os
 
 class SlicerBackend:
     
@@ -21,7 +22,7 @@ class SlicerBackend:
 
     @staticmethod
     def get_points_per_slice(solid_body, z_height):
-        # Extract boundary points of a slice at a given z-height
+        # Extracting the boundary points of a slice at a given z-height
         boundary = []
         for triangles in solid_body.vectors:
             for points in triangles:
@@ -36,7 +37,7 @@ class InfillPatterns:
     
     @staticmethod
     def linear_infill(canvas_size, line_spacing):
-        # Generate a continuous snake-like zigzag linear infill pattern across the square shape
+        # Generate a zigzag linear infill pattern with larger spacing
         x_min, y_min = 0, 0
         x_max, y_max = canvas_size[0], canvas_size[1]
         
@@ -52,15 +53,15 @@ class InfillPatterns:
                 path.append((x_max, y))
                 path.append((x_min, y))
             
-            # Move to the next line down
-            y += line_spacing
+            # Move to the next line with larger spacing
+            y += line_spacing * 2  # Increase spacing by a factor of 2
             direction *= -1  # Reverse direction for the next row
         
         return path
 
     @staticmethod
     def cross_hatching_infill(canvas_size, line_length, num_lines):
-        # Generate cross-hatching pattern for infill
+        # Generate a cross-hatching infill with more spaced-out lines
 
         def generate_random_start_point(canvas_size):
             x = random.uniform(0, canvas_size[0])
@@ -75,7 +76,7 @@ class InfillPatterns:
         
         lines = []
         angle = 0
-        for _ in range(num_lines):
+        for _ in range(num_lines // 2):  # Reduce the number of lines for more spacing
             start_point = generate_random_start_point(canvas_size)
             line = generate_line(start_point, angle, line_length)
             lines.append(line)
@@ -83,30 +84,23 @@ class InfillPatterns:
         return lines
 
     @staticmethod
-    def radial_infill_square(points, p_width=0.8):
-        # Assuming the points define a square or rectangular outer boundary.
+    def radial_infill_square(points, p_width=2.0):
+        # Larger p_width for radial infill to make paths more spaced out
         
-        # Calculating the bounding box (min and max x and y) of the points to get initial square dimensions.
         x_coords, y_coords = zip(*points)
         x_min, x_max = min(x_coords), max(x_coords)
         y_min, y_max = min(y_coords), max(y_coords)
         
-        # List to store each inward square layer.
         layers = []
-        
-        # Generating inward squares until they collapse to the center.
         while (x_max - x_min > p_width * 2) and (y_max - y_min > p_width * 2):
-            # Define the current layer as a square with corners based on min/max x and y.
             layer = [
-                (x_min, y_min),  # Bottom-left corner
-                (x_max, y_min),  # Bottom-right corner
-                (x_max, y_max),  # Top-right corner
-                (x_min, y_max),  # Top-left corner
-                (x_min, y_min)   # Close the square by returning to bottom-left
+                (x_min, y_min),
+                (x_max, y_min),
+                (x_max, y_max),
+                (x_min, y_max),
+                (x_min, y_min)
             ]
             layers.append(layer)
-            
-            # Move inward by the print width (p_width).
             x_min += p_width
             x_max -= p_width
             y_min += p_width
@@ -123,7 +117,7 @@ class InfillPatterns:
         center_y = np.mean([y for x, y in boundary_points])
         
         spiral_path = []
-        radius_decrement = step_length * 0.1
+        radius_decrement = step_length * 0.5  # Increase the step size
         current_boundary = boundary_points
 
         while len(current_boundary) > 2:
@@ -150,72 +144,68 @@ class InfillPatterns:
 
         return spiral_path
 
-def convert_to_gcode(path):
-    # Convert the continuous path of points into G-code commands
-    gcode_commands = ["G21 ; Set units to millimeters", "G90 ; Use absolute positioning", "G1 F1500 ; Set feedrate"]
+def convert_to_gcode(path, speed=60, extrusion_rate=0.5, bead_area_formula=False, scale_factor=10):
+    gcode_commands = [
+        "N0 G21 ; Set units to millimeters",
+        "N10 G90 ; Use absolute positioning",
+        f"N20 G1 F{speed} ; Set feedrate to {speed} mm/min"
+    ]
     
-    # Add the G1 commands to move the printer to each point in the continuous path
-    for x, y in path:
-        gcode_commands.append(f"G1 X{x:.4f} Y{y:.4f}")
+    def bead_area_calculation(H, W):
+        return H * W - (H**2 * (1 - (np.pi / 4)))
+    
+    n_value = 30  # Start with N value 30
+    extrusion_amount = 0
+    H = 0.4
+    W = 0.84
+    Dn = 0.84
+    
+    for i in range(len(path) - 1):
+        x_start, y_start = path[i]
+        x_end, y_end = path[i + 1]
+        
+        # Scale the coordinates to make them 10x larger
+        x_start *= scale_factor
+        y_start *= scale_factor
+        x_end *= scale_factor
+        y_end *= scale_factor
+        
+        # Calculate distance between two points
+        distance = np.linalg.norm([x_end - x_start, y_end - y_start])
+        
+        if bead_area_formula:
+            A_bead = bead_area_calculation(H, W)
+            extrusion_amount += A_bead * distance * Dn
+        
+        gcode_commands.append(f"N{n_value} G1 X{x_end:.4f} Y{y_end:.4f} E{extrusion_amount:.4f} ; Move to point")
+        n_value += 10  # Increment N value
     
     return gcode_commands
 
-def main(filepath, infill_type):
-    # Load and visualize the STL file
+def main(filepath, infill_type, speed=60, extrusion_rate=0.5, bead_area_formula=False):
     solid_body = SlicerBackend.read_file(filepath)
     SlicerBackend.show_file(filepath)
     
-    # Slice the object at a specific layer height (e.g., 0.8)
     slice_points = SlicerBackend.get_points_per_slice(solid_body, z_height=0.8)
     
-    # Choose the infill pattern based on user input
     if infill_type == "1" or infill_type.lower() == "a":
-        points = InfillPatterns.linear_infill(canvas_size=(200, 200), line_spacing=0.5)
+        points = InfillPatterns.linear_infill(canvas_size=(200, 200), line_spacing=5.0)  # Much larger spacing
     elif infill_type == "2" or infill_type.lower() == "b":
-        points = InfillPatterns.cross_hatching_infill(canvas_size=(200, 200), line_length=100, num_lines=10)
+        points = InfillPatterns.cross_hatching_infill(canvas_size=(200, 200), line_length=200, num_lines=5)  # Fewer lines
     elif infill_type == "3" or infill_type.lower() == "c":
-        points = InfillPatterns.radial_infill_square(slice_points, p_width=0.8)
+        points = InfillPatterns.radial_infill_square(slice_points, p_width=2.5)  # Increase width
     elif infill_type == "4" or infill_type.lower() == "d":
-        points = InfillPatterns.adaptive_spiral_infill(slice_points, step_length=0.25)
+        points = InfillPatterns.adaptive_spiral_infill(slice_points, step_length=1.0)  # Larger step
     else:
         raise ValueError("Invalid infill type selected.")
     
-    # Convert the points generated by the selected infill method to G-code
-    gcode_commands = convert_to_gcode(points)
+    gcode_commands = convert_to_gcode(points, speed, extrusion_rate, bead_area_formula)
     
-    # Write the generated G-code commands to a file
-    output_file_path = "/Users/lizbethjurado/Keck/STL/GCODE/generated.gcode"
-    
-    with open(output_file_path, "w") as gcode_file:
-        for command in gcode_commands:
-            gcode_file.write(command + "\n")
-    
-    # Plot the continuous path for linear infill
-    plt.figure()
-    if infill_type in ["1", "a", "A"]:
-        xPoints, yPoints = zip(*points)
-        plt.plot(xPoints, yPoints, marker='o')
-    else:
-        if isinstance(points[0], list):
-            for layer in points:
-                xPoints = [point[0] for point in layer]
-                yPoints = [point[1] for point in layer]
-                plt.plot(xPoints, yPoints, marker='o')
-        else:
-            xPoints = [point[0] for point in points]
-            yPoints = [point[1] for point in points]
-            plt.plot(xPoints, yPoints, marker='o')
-
-    plt.gca().set_aspect('equal', adjustable='box')
-    plt.grid(True)
-    plt.show()
+    output_file_path = '/Users/lizbethjurado/Keck/Slicing Cube/GCode_Output/generated.gcode'
+    with open(output_file_path, 'w') as file:
+        file.write("\n".join(gcode_commands))
+    print(f"G-code has been saved to: {output_file_path}")
 
 if __name__ == "__main__":
-    filepath = '/Users/lizbethjurado/Keck/STL/0.5in cube 1.STL'
-    print("Select infill type:")
-    print("1 or A - Linear Infill")
-    print("2 or B - Cross Hatching Infill")
-    print("3 or C - Radial Infill")
-    print("4 or D - Adaptive Spiral Infill")
-    infill_type = input("Enter your choice: ")
-    main(filepath, infill_type)
+    filepath = '/Users/lizbethjurado/Keck/Slicing Cube/TwentyMMcube.stl'
+    main(filepath, infill_type="4", speed=60, extrusion_rate=0.5, bead_area_formula=True)
