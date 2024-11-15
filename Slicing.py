@@ -98,32 +98,6 @@ def generate_lines(infill_points, direction='vertical'):
             lines.append((infill_points[i], infill_points[i + 1]))
     return lines
 
-def generate_perp_lines(infill_points, direction='vertical'):
-    perp_lines = []
-    pos_points = []
-    neg_points = []
-    if direction == 'horizontal':
-        for i in range(len(infill_points)):
-            perp_lines.append((infill_points[i], infill_points[i + len(infill_points) // 2]))
-    elif direction == 'vertical':
-        for i in range(1, len(infill_points)):
-            if infill_points[i][0] == 0.4:
-                neg_points.append(infill_points[i])
-            else:
-                pos_points.append(infill_points[i])
-                
-        if len(pos_points) % 2 != 0:
-            pos_points.remove(pos_points[-1])
-        if len(neg_points) % 2 != 0:
-            neg_points.remove(neg_points[-1])
-            
-        for i in range(0, len(pos_points), 2):
-            perp_lines.append((pos_points[i], pos_points[i + 1]))
-        for i in range(0, len(neg_points), 2):
-            perp_lines.append((neg_points[i], neg_points[i + 1]))
-            
-    return perp_lines
-
 def random_start(perimeter, prevPoint = None):
     pointList = [(i, j) for i, j in perimeter]
     index = 0
@@ -174,11 +148,8 @@ def convert_to_gcode(points):
 
 if __name__ == "__main__":
     # Load the 3D object and visualize it
-    line_length = 100  # Length of the lines
-    number_of_lines = 10  # Number of lines to generate
     object, visualization = Slicer_backend.read_file_show(filepath=r"C:\Users\zzcro\Desktop\Lab_Assignments\Keck\Ceramics_Paste_Extrusion\TwentyMMcube.stl")
     points= Slicer_backend.get_points_per_slice(object)
-    #print(len(points))
     
     infillPoints = Slicer_backend.fill_in_lines(Slicer_backend.scale_shape_down(points))
     
@@ -188,24 +159,15 @@ if __name__ == "__main__":
     
     points.append(points[0])
     
-    
-    xPoints = [point[0] for point in points]
-    yPoints = [point[1] for point in points]
-    
-    
+       
     xInfillPoints = [point[0] for point in infillPoints]
     yInfillPoints = [point[1] for point in infillPoints]
     
     
-    plt.scatter(xPoints, yPoints, c='blue')
     plt.scatter(startPoint[1][0], startPoint[1][1], c='red')
-    plt.plot(xPoints, yPoints)
-    plt.plot((startPoint[1][0], xInfillPoints[0]), (startPoint[1][1], yInfillPoints[0]))
     
-    points.append(infillPoints[0])
-     
+    points.append(infillPoints[0]) 
     
-    plt.scatter(xInfillPoints, yInfillPoints, c= 'black')
     lines = generate_lines(infillPoints)
     for i in range(len(lines)):
         line = lines[i]
@@ -219,15 +181,13 @@ if __name__ == "__main__":
             if start_x != 19.2:
                 start_x, end_x = end_x, start_x
                 start_y, end_y = end_y, start_y
-        points.extend([(start_x, start_y)])
-        points.extend([(end_x, end_y)])
-        plt.plot((start_x, end_x), (start_y, end_y)) 
+        points.extend([[start_x, start_y]])
+        points.extend([[end_x, end_y]]) 
     
-    perp_lines = generate_perp_lines(infillPoints)
-    for perp_line in perp_lines:
-        [(start_x, start_y), (end_x, end_y)] = perp_line
-        plt.plot((start_x, end_x), (start_y, end_y))    
-    
+    xPoints = [point[0] for point in points]
+    yPoints = [point[1] for point in points]
+    plt.plot(xPoints, yPoints)
+   
     gCodePath = points
     g_commands = convert_to_gcode(gCodePath)
     
