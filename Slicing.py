@@ -3,6 +3,7 @@ import pyvista as pv
 from stl import mesh
 import numpy as np
 from shapely.geometry import Polygon
+import math
 #from scipy.spatial import ConvexHull
 #import random
 
@@ -15,9 +16,9 @@ class Slicer_backend:
         return solid_body, file.plot()
 
     @staticmethod
-    def get_points_per_slice(solid_body):
+    def get_points_per_slice(solid_body, maxLayerHeight, minLayerHeight = 0):
         points = solid_body.vectors.reshape(-1, 3)  # Reshape for easier access
-        z_condition = points[:, 2] <= 0.8  # Create a boolean array for z conditions
+        z_condition = (minLayerHeight <= points[:, 2]) & (points[:, 2] <= maxLayerHeight) # Create a boolean array for z conditions
         valid_points = points[z_condition]  # Filter points based on z
 
         # Create a set of (x, y) tuples
@@ -38,6 +39,7 @@ class Slicer_backend:
     @staticmethod
     def scale_shape_down(perimeter_points, offset_distance=0.8):
         # Create a polygon from the perimeter points
+        print(perimeter_points)
         polygon = Polygon(perimeter_points)
 
         # Offset the polygon inward
@@ -53,14 +55,10 @@ class Slicer_backend:
         return new_perimeter.tolist()  # Convert back to list
         
     @staticmethod
-    def fill_in_lines(perimeter_points, spacing=0.8, direction='vertical'):
+    def fill_in_lines(perimeter_points, spacing=0.8):
         filled_points = set()  # Use a set to avoid duplicates
 
         # Normalize the direction parameter
-        direction = direction.lower()
-        if direction not in ['horizontal', 'vertical']:
-            raise ValueError("Direction must be 'horizontal' or 'vertical'.")
-
         for i in range(len(perimeter_points)):
             start_point = np.array(perimeter_points[i])
             end_point = np.array(perimeter_points[(i + 1) % len(perimeter_points)])
@@ -69,48 +67,93 @@ class Slicer_backend:
             distance = np.linalg.norm(end_point - start_point)
         
             # Generate points only in the specified direction
-            if direction == 'horizontal':
-                num_points = int(np.ceil(distance / spacing))
-                for j in range(num_points):
-                    interpolated_point = start_point + (end_point - start_point) * (j / num_points)
-                    point = (round(interpolated_point[0], 6), round(start_point[1], 6))  # Maintain y-coordinate
-                    filled_points.add(point)
-                
-            elif direction == 'vertical':
-                num_points = int(np.ceil(distance / spacing))
-                for j in range(num_points):
-                    interpolated_point = start_point + (end_point - start_point) * (j / num_points)
-                    point = (round(start_point[0], 6), round(interpolated_point[1], 6))  # Maintain x-coordinate
-                    filled_points.add(point)
+            num_points = int(np.ceil(distance / spacing))
+            for j in range(num_points):
+                interpolated_point = start_point + (end_point - start_point) * (j / num_points)
+                point = (round(interpolated_point[0], 6), round(start_point[1], 6))  # Maintain y-coordinate
+                filled_points.add(point)
+                point = (round(start_point[0], 6), round(interpolated_point[1], 6))  # Maintain x-coordinate
+                filled_points.add(point)
                     
-                    # Convert the set to a list and sort it
+        # Convert the set to a list and sort it
         sorted_points = sorted(filled_points, key=lambda x: (x[1], x[0] if int(x[1] * 100) % 2 == 0 else -x[0]))
 
         return np.array(sorted_points).tolist()  # Convert back to list
 
-def generate_lines(infill_points, direction='vertical'):
+def calculate_centroid(points): 
+    # Calculate the centroid of the points
+    x_sum = sum(p[0] for p in points)
+    y_sum = sum(p[1] for p in points)
+    return (x_sum / len(points), y_sum / len(points))
+
+def sort_points_counter_clockwise(points, start_point):
+    centroid = calculate_centroid(points)
+    
+    def angle_from_centroid(point):
+        # Using math.atan2 to compute the angle relative to the centroid
+        dx = point[0] - centroid[0]
+        dy = point[1] - centroid[1]
+        return math.atan2(dy, dx)
+    
+    sorted_points = sorted(points, key=angle_from_centroid)
+    start_index = sorted_points.index(start_point)
+    # Rotate the list so that the closest point is the starting point
+    return sorted_points[start_index:] + sorted_points[:start_index]
+
+
+
+def generate_lines(infill_points, direction='horizontal'):
     lines = []
     if direction == 'horizontal':
+        j = -1 * len(infill_points) // 4
         for i in range(len(infill_points) // 2):
-            lines.append((infill_points[i], infill_points[i + len(infill_points) // 2]))
+            if i % 2 == 0:
+                lines.append((infill_points[i], infill_points[j]))
+            else:
+                lines.append((infill_points[j], infill_points[i]))
+            j-= 1
     elif direction == 'vertical':
-        for i in range(0, len(infill_points), 2):
-            lines.append((infill_points[i], infill_points[i + 1]))
+        j = len(infill_points) // 4
+        for i in range(0, -1 * len(infill_points) // 2, -1):
+            if i % 2 == 0:
+                lines.append((infill_points[i], infill_points[j]))
+            else:
+                lines.append((infill_points[j], infill_points[i]))
+            j += 1
+    elif direction == 'angled':
+        for i in range(len(infill_points) // 2 + 1):
+            if i == 0 or i == len(infill_points) // 2:
+                lines.append((infill_points[i], infill_points[i]))
+            if i % 2 == 0:
+                lines.append((infill_points[-i], infill_points[i]))
+            else:
+                lines.append((infill_points[i], infill_points[-i]))
     return lines
 
 def random_start(perimeter, prevPoint = None):
-    pointList = [(i, j) for i, j in perimeter]
-    index = 0
+    pointList = [[i, j] for i, j in perimeter]
     if prevPoint == None:
-        return (0, pointList[0])
+        return [1, pointList[0]]
+    index = prevPoint
+    if index == 0:
+        index += len(pointList) // 2
     else:
-        if index > 0:
-            index -= len(pointList) / 2
-            return (index, pointList[index])            
-        else:
-            index += len(pointList) / 2
-            return (index, pointList[index])
-    
+        index = 0
+    return [index, pointList[index]]
+
+def find_closest_point_index(points, key_point):
+    closest_index = -1
+    min_distance = float('inf')
+
+    for i, point in enumerate(points):
+        # Calculate Euclidean distance
+        distance = math.sqrt((point[0] - key_point[0]) ** 2 + (point[1] - key_point[1]) ** 2)
+        if distance < min_distance:
+            min_distance = distance
+            closest_index = i
+
+    return closest_index
+
 def convert_to_gcode(points):
     #Dn = 0.84   mm diameter of nozzle
     #U = 10   mm/s print speed
@@ -125,10 +168,16 @@ def convert_to_gcode(points):
     
     for i in range(len(points)):
         point = points[i]
-        (x_start, y_start) = point
+        print(point)
+        if len(point) == 3:
+            (x_start, y_start, z_start) = point
+            g_commands.append(f"N{Nval} G0 X{x_start:.4f} Y{y_start:.4f} Z{z_start:.4f}")
+            Nval += 10
+        else:
+            (x_start, y_start) = point
         if len(g_commands) == 0:
             g_commands = ["G21 ; Set units to millimeters", "G90 ; Use absolute positioning", "G1 F1500 ; Set feedrate"]
-            g_commands.append(f"N0 G0 X{x_start:.4f} Y{y_start:.4f}")
+            g_commands.append(f"N{Nval} G0 X{x_start:.4f} Y{y_start:.4f}")
             Nval += 10
             continue
         if f"G1 X{x_start:.4f} Y{y_start:.4f}" not in g_commands[-1] and f"G0 X{x_start:.4f} Y{y_start:.4f}" not in g_commands[-1]:
@@ -137,72 +186,89 @@ def convert_to_gcode(points):
             E_distance = np.linalg.norm(end_point - start_point)
             if len(points) > 1:
                 Pvalue = A_bead * E_distance * Ext_mult + Pvalue
-                if E_distance < (W / 2) + .16:
-                    g_commands.append(f"N{Nval} G0 X{x_start:.4f} Y{y_start:.4f}")
-                    Nval += 10
-                    continue
+                #if E_distance < W:
+                    #g_commands.append(f"N{Nval} G0 X{x_start:.4f} Y{y_start:.4f}")
+                    #Nval += 10
+                    #continue
                 g_commands.append(f"N{Nval} G1 X{x_start:.4f} Y{y_start:.4f} P{Pvalue}")
                 Nval += 10
 
     return g_commands
 
 if __name__ == "__main__":
+    current_layer_height = 0
+    bead_height = .4
+    max_layer_height = bead_height
+    currentStartPoint = None
+    nextStartPoint = None
+    points = []
+    g_code_path = []
+    directionDic = {"1":'vertical', "2":'horizontal', "3":'angled'}
+    direction = directionDic[input("Choose infill method:\n1. Vertical\n2. Horizontal\n3. Angled\n")]
+    
     # Load the 3D object and visualize it
     object, visualization = Slicer_backend.read_file_show(filepath=r"C:\Users\zzcro\Desktop\Lab_Assignments\Keck\Ceramics_Paste_Extrusion\TwentyMMcube.stl")
-    points= Slicer_backend.get_points_per_slice(object)
+    ''' Slice Per Layer '''
+    vectors = object.vectors.reshape(-1,3)
+    maxZIndex = np.argmax(vectors[:,2])
+    maxZ = vectors[maxZIndex][2]
     
-    infillPoints = Slicer_backend.fill_in_lines(Slicer_backend.scale_shape_down(points))
-    
-    plt.figure()
-    
-    startPoint = random_start(points, None)
-    
-    points.append(points[0])
-    
-       
-    xInfillPoints = [point[0] for point in infillPoints]
-    yInfillPoints = [point[1] for point in infillPoints]
-    
-    
-    plt.scatter(startPoint[1][0], startPoint[1][1], c='red')
-    
-    points.append(infillPoints[0]) 
-    
-    lines = generate_lines(infillPoints)
-    for i in range(len(lines)):
-        line = lines[i]
-        [(start_x, start_y), (end_x, end_y)] = line
-
-        if i % 2 == 0:
-            if start_x != 0.8:
-                start_x, end_x = end_x, start_x
-                start_y, end_y = end_y, start_y
+    while(current_layer_height < maxZ):
+        points = points if (temp_points := Slicer_backend.get_points_per_slice(object, max_layer_height, current_layer_height)) == [] else temp_points
+        GCodepoints = points
+        plt.figure()
+        
+        infill_points = Slicer_backend.fill_in_lines(Slicer_backend.scale_shape_down(points))
+        if currentStartPoint is None:
+            currentStartPoint = random_start(points)
         else:
-            if start_x != 19.2:
-                start_x, end_x = end_x, start_x
-                start_y, end_y = end_y, start_y
-        points.extend([[start_x, start_y]])
-        points.extend([[end_x, end_y]]) 
+            currentStartPoint = nextStartPoint
+            currentStartPoint[1].append(current_layer_height)
+        GCodepoints = sort_points_counter_clockwise(GCodepoints, currentStartPoint[1][:2])
+        GCodepoints.append(GCodepoints[0])
+        
+        infillStartIndex = find_closest_point_index(infill_points, GCodepoints[0])
+        infill_points = sort_points_counter_clockwise(infill_points, infill_points[infillStartIndex])
+        
+        plt.scatter(currentStartPoint[1][0], currentStartPoint[1][1], c='red')
+        
     
-    xPoints = [point[0] for point in points]
-    yPoints = [point[1] for point in points]
-    plt.plot(xPoints, yPoints)
-   
-    gCodePath = points
-    g_commands = convert_to_gcode(gCodePath)
+        GCodepoints.append(infill_points[0]) 
+        lines = generate_lines(infill_points, direction)
+        for i in range(len(lines)):
+            line = lines[i]
+            [(start_x, start_y), (end_x, end_y)] = line
+            if line[0] == line[1]:
+                GCodepoints.extend([[start_x, start_y]])
+            else:
+                GCodepoints.extend([[start_x, start_y]])
+                GCodepoints.extend([[end_x, end_y]]) 
     
-    ''' 
-    1.5 Milimeter or 0.8 Milimeter Extrusion Diameter
-    0.4 Milimeter Height
-    '''
-    output_file_path = "/Users/zzcro/Desktop/Lab_Assignments/Keck/Ceramics_Paste_Extrusion/generated.gcode"
+        x_points = [point[0] for point in GCodepoints]
+        y_points = [point[1] for point in GCodepoints]
+        plt.plot(x_points, y_points)
+        
+        current_layer_height += bead_height
+        max_layer_height += bead_height
+        
+        if current_layer_height < maxZ:
+            nextStartPoint = random_start(points if (temp_points := Slicer_backend.get_points_per_slice(object, max_layer_height, current_layer_height)) == [] else temp_points, currentStartPoint[0])
+            g_code_path.extend(GCodepoints)
+            g_code_path.append(nextStartPoint[1])
+        else:
+            g_code_path.extend(GCodepoints)
+        
+        
+        output_file_path = r"C:\Users\zzcro\Desktop\Lab_Assignments\Keck\Ceramics_Paste_Extrusion\generated.gcode"
+        plt.gca().set_aspect('equal', adjustable='box')
+        plt.grid(True)
+        plt.show()
+    g_commands = convert_to_gcode(g_code_path)
+        
+
     with open(output_file_path, "w") as gcode_file:
         for command in g_commands:
             gcode_file.write(command + "\n")
-     
-    plt.gca().set_aspect('equal', adjustable='box')
-    plt.grid(True)
-    plt.show()
     
     
     
