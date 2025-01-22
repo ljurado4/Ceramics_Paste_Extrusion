@@ -39,7 +39,6 @@ class Slicer_backend:
     @staticmethod
     def scale_shape_down(perimeter_points, offset_distance=0.8):
         # Create a polygon from the perimeter points
-        print(perimeter_points)
         polygon = Polygon(perimeter_points)
 
         # Offset the polygon inward
@@ -133,7 +132,7 @@ def generate_lines(infill_points, direction='horizontal'):
 def random_start(perimeter, prevPoint = None):
     pointList = [[i, j] for i, j in perimeter]
     if prevPoint == None:
-        return [1, pointList[0]]
+        return [0, pointList[0]]
     index = prevPoint
     if index == 0:
         index += len(pointList) // 2
@@ -168,7 +167,6 @@ def convert_to_gcode(points):
     
     for i in range(len(points)):
         point = points[i]
-        print(point)
         if len(point) == 3:
             (x_start, y_start, z_start) = point
             g_commands.append(f"N{Nval} G0 X{x_start:.4f} Y{y_start:.4f} Z{z_start:.4f}")
@@ -196,79 +194,103 @@ def convert_to_gcode(points):
     return g_commands
 
 if __name__ == "__main__":
+    # Initialization
     current_layer_height = 0
-    bead_height = .4
+    bead_height = 0.4
     max_layer_height = bead_height
     currentStartPoint = None
     nextStartPoint = None
     points = []
     g_code_path = []
-    directionDic = {"1":'vertical', "2":'horizontal', "3":'angled'}
+    directionDic = {"1": 'vertical', "2": 'horizontal', "3": 'angled'}
+
+    # Choose infill direction
     direction = directionDic[input("Choose infill method:\n1. Vertical\n2. Horizontal\n3. Angled\n")]
-    
-    # Load the 3D object and visualize it
+    directionChange = int(input("How many layers until infill method should change: "))
+    if directionChange == 0:
+        directionChange = -1
+
+    # Load and visualize the 3D object
     object, visualization = Slicer_backend.read_file_show(filepath=r"C:\Users\zzcro\Desktop\Lab_Assignments\Keck\Ceramics_Paste_Extrusion\TwentyMMcube.stl")
-    ''' Slice Per Layer '''
-    vectors = object.vectors.reshape(-1,3)
-    maxZIndex = np.argmax(vectors[:,2])
+
+    # Slice the object per layer
+    vectors = object.vectors.reshape(-1, 3)
+    maxZIndex = np.argmax(vectors[:, 2])
     maxZ = vectors[maxZIndex][2]
-    
-    while(current_layer_height < maxZ):
-        points = points if (temp_points := Slicer_backend.get_points_per_slice(object, max_layer_height, current_layer_height)) == [] else temp_points
+
+    while current_layer_height < maxZ:
+        # Handle direction change
+        if directionChange == 0:
+            plt.gca().set_aspect('equal', adjustable='box')
+            plt.grid(True)
+            plt.show()
+            direction = directionDic[input("Choose new infill method:\n1. Vertical\n2. Horizontal\n3. Angled\n")]
+            directionChange = int(input("How many layers until infill method should change: "))
+            if directionChange == 0:
+                directionChange = -1
+
+        # Get points for the current slice
+        temp_points = Slicer_backend.get_points_per_slice(object, max_layer_height, current_layer_height)
+        points = points if temp_points == [] else temp_points
         GCodepoints = points
-        plt.figure()
-        
+
+        # Generate infill points
         infill_points = Slicer_backend.fill_in_lines(Slicer_backend.scale_shape_down(points))
+
+        # Determine start point
         if currentStartPoint is None:
             currentStartPoint = random_start(points)
         else:
             currentStartPoint = nextStartPoint
             currentStartPoint[1].append(current_layer_height)
+
+        # Sort points and generate G-code path
         GCodepoints = sort_points_counter_clockwise(GCodepoints, currentStartPoint[1][:2])
         GCodepoints.append(GCodepoints[0])
-        
         infillStartIndex = find_closest_point_index(infill_points, GCodepoints[0])
         infill_points = sort_points_counter_clockwise(infill_points, infill_points[infillStartIndex])
-        
         plt.scatter(currentStartPoint[1][0], currentStartPoint[1][1], c='red')
-        
-    
-        GCodepoints.append(infill_points[0]) 
+
+        # Append infill lines to GCodepoints
+        GCodepoints.append(infill_points[0])
         lines = generate_lines(infill_points, direction)
-        for i in range(len(lines)):
-            line = lines[i]
+        for line in lines:
             [(start_x, start_y), (end_x, end_y)] = line
-            if line[0] == line[1]:
-                GCodepoints.extend([[start_x, start_y]])
-            else:
-                GCodepoints.extend([[start_x, start_y]])
-                GCodepoints.extend([[end_x, end_y]]) 
-    
+            GCodepoints.extend([[start_x, start_y], [end_x, end_y]])
+
+        # Plot current layer
         x_points = [point[0] for point in GCodepoints]
         y_points = [point[1] for point in GCodepoints]
         plt.plot(x_points, y_points)
-        
+
+        # Update layer heights
         current_layer_height += bead_height
         max_layer_height += bead_height
-        
+
+        # Determine next start point
         if current_layer_height < maxZ:
-            nextStartPoint = random_start(points if (temp_points := Slicer_backend.get_points_per_slice(object, max_layer_height, current_layer_height)) == [] else temp_points, currentStartPoint[0])
+            temp_points = Slicer_backend.get_points_per_slice(object, max_layer_height, current_layer_height)
+            nextStartPoint = random_start(points if temp_points == [] else temp_points, currentStartPoint[0])
             g_code_path.extend(GCodepoints)
             g_code_path.append(nextStartPoint[1])
         else:
             g_code_path.extend(GCodepoints)
-        
-        
-        output_file_path = r"C:\Users\zzcro\Desktop\Lab_Assignments\Keck\Ceramics_Paste_Extrusion\generated.gcode"
-        plt.gca().set_aspect('equal', adjustable='box')
-        plt.grid(True)
-        plt.show()
+
+        if directionChange != -1:
+            directionChange -= 1
+
+    # Generate and save G-code
+    output_file_path = r"C:\Users\zzcro\Desktop\Lab_Assignments\Keck\Ceramics_Paste_Extrusion\generated.gcode"
     g_commands = convert_to_gcode(g_code_path)
-        
+
+    plt.gca().set_aspect('equal', adjustable='box')
+    plt.grid(True)
+    plt.show()
 
     with open(output_file_path, "w") as gcode_file:
         for command in g_commands:
             gcode_file.write(command + "\n")
+
     
     
     
