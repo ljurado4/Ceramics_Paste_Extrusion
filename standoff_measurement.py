@@ -1,24 +1,17 @@
 import cv2
 import sys
 import statistics
-import tkinter
-from tkinter import filedialog
 from google.cloud import vision
 import io
 
-# Import image using CLI or file dialog
+# Import image using uploaded file path
 def image_import():
-    if len(sys.argv) > 1:
-        # Get image from command-line
-        image_path = sys.argv[1]
-    else:
-        tkinter.Tk().withdraw()  # Stop tkinter from opening a window
-        image_path = filedialog.askopenfilename()  # Open file dialog
+    image_path = "/Users/lizbethjurado/Keck/Stand Off Images/10-16-24-LED-Images/Image_0.4_All_LED_255_White_RM_Lights_On_Exposure_1.2e5.bmp"
     img = cv2.imread(image_path)  # Read the image
 
     if img is None:
         print(f"Error: Couldn't load image at {image_path}")
-        return
+        return None, None
     return img, image_path
 
 # Use Google Vision API to find objects in the image
@@ -93,6 +86,10 @@ def measure_standoff(nozzle_bottom, calibration_factor, plate_top):
 if __name__ == "__main__":
     # Import image
     img, image_path = image_import()
+
+    if img is None or image_path is None:
+        print("Image import failed. Exiting...")
+        sys.exit(1)
 
     # Preprocess the image
     morph, width, height, roi = preprocess_image(img)
