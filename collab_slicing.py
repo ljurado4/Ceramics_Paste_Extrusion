@@ -190,11 +190,22 @@ def main(filepath, infill_type, speed=60, extrusion_rate=0.5, bead_area_formula=
     z_max = max(solid_body.vectors[:, :, 2].flatten())
     z_heights = np.arange(0, z_max, layer_height)
 
+    # Debugging: Print Z-heights and layer height
+    print(f"Z-Max: {z_max}, Layer Height: {layer_height}")
+    print(f"Z-Heights: {z_heights}")
+
     # Slice the model and process each layer
     layers = SlicerBackend.get_points_per_layer(solid_body, z_heights)
     gcode_commands = []
+
     for i, slice_points in enumerate(layers):
+        # Debugging: Print the number of points for the current slice
         print(f"Processing layer {i + 1} at Z={z_heights[i]:.2f}")
+        print(f"Number of boundary points in layer {i + 1}: {len(slice_points)}")
+
+        if not slice_points:
+            print(f"Skipping empty layer at Z={z_heights[i]:.2f}")
+            continue
 
         # Select the infill pattern based on user input
         if infill_type == "1" or infill_type.lower() == "a":
@@ -208,8 +219,15 @@ def main(filepath, infill_type, speed=60, extrusion_rate=0.5, bead_area_formula=
         else:
             raise ValueError("Invalid infill type selected.")
 
+        # Debugging: Print the infill points for the layer
+        print(f"Number of infill points in layer {i + 1}: {len(points)}")
+
         # Generate G-code for the current layer and add it to the overall commands
         layer_gcode = convert_to_gcode(points, speed, extrusion_rate, bead_area_formula, use_ceramic_extrusion)
+
+        # Debugging: Print the number of G-code commands generated for this layer
+        print(f"G-code commands generated for layer {i + 1}: {len(layer_gcode)}")
+
         gcode_commands.extend(layer_gcode)
 
     # Save the G-code for both Lizbeth and Zack
