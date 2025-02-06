@@ -1,246 +1,107 @@
 import cv2
 import sys
 import statistics
-import tkinter
-from tkinter import filedialog
+from google.cloud import vision
+import io
 
+# Import image using uploaded file path
 def image_import():
-    """
-    Imports image using CLI or via tkinter dialog window.
+    image_path = "/Users/lizbethjurado/Keck/Stand Off Images/10-16-24-LED-Images/Image_0.4_All_LED_255_White_RM_Lights_On_Exposure_1.2e5.bmp"
+    img = cv2.imread(image_path)  # Read the image
 
-    Returns:
-        :img (_Matlike_): Array of image pixel color values.
-    """    
-    if len(sys.argv) > 1:
-        # Get the image path from the command-line argument
-        image_path = sys.argv[1]
-    else:
-        # Prevents default tkinter window from opening
-        tkinter.Tk().withdraw()
-
-    # Opens native dialog window for image selection
-    image_path=filedialog.askopenfilename()
-    img = cv2.imread(image_path)
-
-    # Prevent image import error
     if img is None:
-        print(f"Error: Unable to load image at {image_path}")
-        return
-    
-    return img
+        print(f"Error: Couldn't load image at {image_path}")
+        return None, None
+    return img, image_path
 
-def image_processing(img):
-    """
-    Applies area and ROI based filters to identify nozzle contour, draws bounding box around it, and sets calibration factor based on it's width.
+# Use Google Vision API to find objects in the image
+def google_vision_boundary_analysis(image_path):
+    client = vision.ImageAnnotatorClient()
+    with io.open(image_path, 'rb') as image_file:
+        content = image_file.read()
 
-    Parameters:
-        img (_Matlike_): Array of image pixel color values.
+    image = vision.Image(content=content)
+    response = client.object_localization(image=image)
 
-    Returns:
-        :morph (_Matlike_): Processed image using morphological close to separate binary image regions.
-        :width (_int_): Width of full image in pixels.
-        :height (_int_): Height of full image in pixels.
-        :roi (_Matlike_): Lower half of image to focus on region of interest.
-    """
-    # Convert to grayscale
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    output_path = "image_gray.png"
-    cv2.imwrite(output_path, gray)
-
-    # Define region of interest (ROI) - Bottom part of the image
-    height, width = gray.shape
-    roi = gray[int(height * 0.5):, :]
-
-    # Apply adaptive thresholding to highlight the bright area between the nozzle and the bed
-    thresh = cv2.adaptiveThreshold(roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 3)
-    output_path = "image_thresh.png"
-    cv2.imwrite(output_path, thresh)
-
-    # Apply morphological operations to clean up small noise
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-    morph = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-
-    # Displaying morph for analysis
-    output_path = "image_morph.png"
-    cv2.imwrite(output_path, morph)
-
-    return morph, width, height, roi
-
-def image_contours(morph, height):
-    """
-    Applies area based filters to reduce 'noise', i.e. the number of identified contours, and focus on relevant sized ROI.
-
-    Parameters:
-        morph (_Matlike_): Processed image using morphological close to separate binary image regions.
-        height (_int_): Height of image in pixels.
-
-    Returns:
-        :contours (tuple Sequence[Matlike]): All detected closed-body contours.
-    """
-    # Find contours in the ROI
-    contours, _ = cv2.findContours(morph, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    # Create a img copy for displaying contour step
-    img_contours = img.copy()
-
-    # Area limit for filtering out less significant contours
-    min_area = 500
-    filtered_contours = [contour for contour in contours if cv2.contourArea(contour) > min_area]
-
-    # Displaying contours for analysis
-    cv2.drawContours(img_contours[int(height * 0.5):], filtered_contours, -1, (0, 255, 0), 2)
-    output_path = "image_contour.png"
-    cv2.imwrite(output_path, img_contours)
-
+    contours = []
+    for obj in response.localized_object_annotations:
+        print(f"Object: {obj.name}, Confidence: {obj.score}")
+        box = [(int(vertex.x * 1000), int(vertex.y * 1000)) for vertex in obj.bounding_poly.normalized_vertices]
+        contours.append(box)
     return contours
 
-def nozzle_contour(contours, width, height):
-    """
-    Applies area and ROI based filters to identify nozzle contour, draws bounding box around it, and sets calibration factor based on it's width.
+# Preprocess the image for better analysis
+def preprocess_image(img):
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)  # Convert to grayscale
+    height, width = gray.shape
+    roi = gray[int(height * 0.5):, :]  # Focus on the bottom part
+    thresh = cv2.adaptiveThreshold(roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 3)  # Threshold
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    morph = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)  # Clean up noise
+    return morph, width, height, roi
 
-    Parameters:
-        contours (_tuple Sequence[Matlike]_): All detected closed-body contours.
-        width (_int_): Width of image in pixels.
-        height (_int_): Height of image in pixels.
-
-    Returns:
-        :nozzle_bottom (_tuple [int, int]_): XY coords representing the bottom center of the nozzle contour.
-        :calibration_factor (_float_): Ratio for image in mm/pixel.
-    """
-    # # For use only if multiple sizes are expected
-    # # Establishing calibration factor for various nozzle sizes
-    # nozzle_ID = float(input("Enter nozzle inner diameter: "))
-    # if nozzle_ID == 0.8:
-    #     nozzle_OD = 1.26
-    nozzle_OD = 1.26
-
-    # Find the lowest point of the nozzle and the highest point of the platform (in the original image)
+# Find nozzle using Google Vision data
+def find_nozzle(contours, width, height):
     nozzle_bottom = None
     nozzle_rect = None
+    nozzle_OD = 1.26  # Nozzle outer diameter in mm
 
-    # Locate the nozzle bottom based on contour analysis
     for contour in contours:
-        area = cv2.contourArea(contour)
-        if area > 200:
-            x, y, w, h = cv2.boundingRect(contour)
-            
-            # ROI filter since nozzle should be centered and higher than plate
-            if y < height * 0.2 and x<0.75*width and x>0.25*width:
-                nozzle_bottom = (x + w // 2, int(height * 0.5) + y + h)
-                nozzle_rect = (x, int(height * 0.5) + y, w, h)
-    
-    # Calculating calibration factor 
-    calibration_factor = nozzle_OD / nozzle_rect[2]
-    print(f"Calibration Factor = {calibration_factor:.3f} mm/pixel")  
+        x = min([point[0] for point in contour])
+        y = min([point[1] for point in contour])
+        w = max([point[0] for point in contour]) - x
+        h = max([point[1] for point in contour]) - y
 
-    # Displaying nozzle bounding box as cyan rectangle
-    if nozzle_rect is not None:
-        cv2.rectangle(img, (nozzle_rect[0], nozzle_rect[1]), 
-                        (nozzle_rect[0] + nozzle_rect[2], nozzle_rect[1] + nozzle_rect[3]), 
-                        (255, 255, 0), 2)
+        if y < height * 0.2 and x < 0.75 * width and x > 0.25 * width:
+            nozzle_bottom = (x + w // 2, int(height * 0.5) + y + h)
+            nozzle_rect = (x, int(height * 0.5) + y, w, h)
+
+    if nozzle_rect:
+        calibration_factor = nozzle_OD / nozzle_rect[2]  # Calculate mm/pixel
+        print(f"Calibration Factor: {calibration_factor:.3f} mm/pixel")
+        return nozzle_bottom, calibration_factor
     else:
-        print("Error: Unable to detect nozzle bottom for measurement.")
+        print("No nozzle detected!")
+        return None, None
 
-    return nozzle_bottom, calibration_factor
-
-def plate_contour(contours):
-    """
-    Applies area and ROI based filters to identify plate contour & draws bounding box around it.
-
-    Parameters:
-        contours (_tuple Sequence[Matlike]_): All detected closed-body contours.
-
-    Returns:
-        :plate_top (_tuple [int, int]_): XY coords representing the top center of the plate contour.
-    """
-    # Locate the top of the plate based on contour analysis
+# Find the top of the plate
+def find_plate(contours):
     for contour in contours:
-        area = cv2.contourArea(contour)
-        if area > 1000:
-            x, y, w, h = cv2.boundingRect(contour)
+        x = min([point[0] for point in contour])
+        y = min([point[1] for point in contour])
+        w = max([point[0] for point in contour]) - x
+        h = max([point[1] for point in contour]) - y
+        plate_top = (x + w // 2, int(y))
+        return plate_top
 
-            # Shifting ROI to top half of plate contour since longest edges are near top or bottom
-            y_coords = [point[0][1] for point in contour]
-            sorted_y_coords = sorted(y_coords)
-            mid_point = len(sorted_y_coords) // 2
-            cutoff_value = sorted_y_coords[mid_point]
-            filtered_y_coords = sorted([y for y in y_coords if y < cutoff_value])
-            
-            try:
-                # Calculate mode of y-coordinates to find longest consistent edge
-                y = int(statistics.mode(filtered_y_coords))
-            except statistics.StatisticsError:
-                # Handle cases with no unique mode by using the minimum y-value
-                y = int(min(filtered_y_coords))
-            plate_top = (x + w // 2, int(height * 0.5) + y)
-            plate_rect = (x, int(height * 0.5) + y, w, h)
-
-            # Assuming platform contour is the first prominent one found
-            break
-
-    # Displaying plate bounding box as magenta rectangle
-    if plate_rect is not None:
-        cv2.rectangle(img, (plate_rect[0], plate_rect[1]), 
-                        (plate_rect[0] + plate_rect[2], plate_rect[1] + plate_rect[3]), 
-                        (255, 0, 255), 2)
-    else:
-        print("Error: Unable to detect plate top for measurement.")
-
-    return plate_top
-
+# Measure distance between nozzle and plate
 def measure_standoff(nozzle_bottom, calibration_factor, plate_top):
-    """
-    Measures distance between the bounding boxes identified for top bed surface and bottom nozzle surface.
-
-    Parameters:
-        image_path (_str_): File path to raw image.
-    """    
-
-    try:
-        # Calculate the vertical distance between the bottom of the nozzle and the top of the platform (white gap)
-        gap_pixels = abs(nozzle_bottom[1] - plate_top[1])
-        gap_distance_mm = gap_pixels * calibration_factor
-
-        # Display the result in the terminal
+    if nozzle_bottom and plate_top:
+        gap_pixels = abs(nozzle_bottom[1] - plate_top[1])  # Get pixel gap
+        gap_distance_mm = gap_pixels * calibration_factor  # Convert to mm
         print(f"Standoff Distance: {gap_distance_mm:.3f} mm")
-
-        # Draw contours for visualization
-        img_result = img.copy()
-        cv2.circle(img_result, nozzle_bottom, 5, (0, 255, 255), -1)  # Yellow dot for needle bottom
-        cv2.circle(img_result, plate_top, 5, (255, 255, 0), -1)  # Cyan dot for platform top
-
-        # Draw the vertical line for distance measurement (white gap)
-        x_coord = nozzle_bottom[0]  # Use the x-coordinate of the needle's bottom point
-        cv2.line(img_result, (x_coord, nozzle_bottom[1]), (x_coord, plate_top[1]), (0, 0, 255), 2)  # Red vertical line
-
-        # Save or display the resulting image
-        output_path = "image_measure.png"
-        cv2.imwrite(output_path, img_result)
-
-        # Display the image with the measurements
-        # cv2.imshow('Measured Image - White Gap', img_result)
-        # cv2.waitKey(0)
-        # cv2.destroyAllWindows()
-
-    except Exception as e:
-        print(f"Measurement failed: {e}")
+    else:
+        print("Couldn't measure standoff distance!")
 
 if __name__ == "__main__":
-    
-    # Import image 
-    img = image_import()
+    # Import image
+    img, image_path = image_import()
 
-    # Adaptive thresholding and noise reduction
-    morph, width, height, roi = image_processing(img)
+    if img is None or image_path is None:
+        print("Image import failed. Exiting...")
+        sys.exit(1)
 
-    # Filter contours by area
-    contours = image_contours(morph, height)
+    # Preprocess the image
+    morph, width, height, roi = preprocess_image(img)
 
-    # ROI filter to identify lowest horizontal border of nozzle and calibration factor
-    nozzle_bottom, calibration_factor = nozzle_contour(contours, width, height)
+    # Use Google Vision API to detect objects
+    contours = google_vision_boundary_analysis(image_path)
 
-    # ROI filter to identify highest horizontal border of plate
-    plate_top = plate_contour(contours)
+    # Find the nozzle position
+    nozzle_bottom, calibration_factor = find_nozzle(contours, width, height)
 
-    # Measure vertical distance between platform_top and nozzle_bottom and visualize
+    # Find the plate position
+    plate_top = find_plate(contours)
+
+    # Measure and display the standoff distance
     measure_standoff(nozzle_bottom, calibration_factor, plate_top)
