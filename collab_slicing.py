@@ -3,7 +3,6 @@ import numpy as np
 import pyvista as pv
 from stl import mesh
 from scipy.spatial import ConvexHull
-import random
 import os
 
 class SlicerBackend:
@@ -25,14 +24,26 @@ class SlicerBackend:
                 intersections = []
                 for i in range(3):
                     p1, p2 = triangles[i], triangles[(i + 1) % 3]
+
+                    # Ensure we don't divide by zero
+                    if (p2[2] - p1[2]) == 0:
+                        continue
+
                     if (p1[2] - z_height) * (p2[2] - z_height) <= 0:
                         t = (z_height - p1[2]) / (p2[2] - p1[2])
                         intersect_point = p1 + t * (p2 - p1)
                         intersections.append(intersect_point[:2])
+
                 if len(intersections) == 2:
                     for point in intersections:
                         if tuple(point) not in boundary:
                             boundary.append(tuple(point))
+
+            # Ensure boundary points form a valid shape
+            if len(boundary) >= 3:
+                hull = ConvexHull(boundary)
+                boundary = [boundary[i] for i in hull.vertices]
+
             layers.append(boundary)
         return layers
 
@@ -97,6 +108,10 @@ def main(filepath, infill_type, speed=20, extrusion_rate=0.5, bead_area_formula=
 
     lizbeth_output_path = '/Users/lizbethjurado/Keck/Slicing Cube/GCode_Output/generated.gcode'
     zack_output_path = 'C:\\Users\\zach\\Desktop\\SlicingCube\\GCode_Output\\generated.gcode'
+
+    # Ensure output directory exists before writing
+    os.makedirs(os.path.dirname(lizbeth_output_path), exist_ok=True)
+    os.makedirs(os.path.dirname(zack_output_path), exist_ok=True)
 
     with open(lizbeth_output_path, 'w') as file:
         file.write("\n".join(gcode_commands))
