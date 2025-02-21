@@ -8,6 +8,8 @@ import os
 class SlicerBackend:
     @staticmethod
     def read_file(filepath):
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"STL file not found: {filepath}")
         return mesh.Mesh.from_file(filepath)
 
     @staticmethod
@@ -80,6 +82,7 @@ def convert_to_gcode(path, speed=20, extrusion_rate=0.5, bead_area_formula=False
     return gcode_commands, extrusion_amount
 
 def main(filepath, infill_type, speed=20, extrusion_rate=0.5, bead_area_formula=False):
+    # Ensure STL file exists
     solid_body = SlicerBackend.read_file(filepath)
     SlicerBackend.show_file(filepath)
 
@@ -110,19 +113,26 @@ def main(filepath, infill_type, speed=20, extrusion_rate=0.5, bead_area_formula=
     zack_output_path = 'C:\\Users\\zach\\Desktop\\SlicingCube\\GCode_Output\\generated.gcode'
 
     # Ensure output directory exists before writing
-    os.makedirs(os.path.dirname(lizbeth_output_path), exist_ok=True)
-    os.makedirs(os.path.dirname(zack_output_path), exist_ok=True)
+    if lizbeth_output_path and os.path.dirname(lizbeth_output_path):
+        os.makedirs(os.path.dirname(lizbeth_output_path), exist_ok=True)
+    
+    if zack_output_path and os.path.dirname(zack_output_path):
+        os.makedirs(os.path.dirname(zack_output_path), exist_ok=True)
 
-    with open(lizbeth_output_path, 'w') as file:
-        file.write("\n".join(gcode_commands))
-    print(f"G-code saved to: {lizbeth_output_path}")
+    # Write G-code to Lizbeth's path
+    if lizbeth_output_path:
+        with open(lizbeth_output_path, 'w') as file:
+            file.write("\n".join(gcode_commands))
+        print(f"G-code saved to: {lizbeth_output_path}")
 
-    with open(zack_output_path, 'w') as file:
-        file.write("\n".join(gcode_commands))
-    print(f"G-code saved to: {zack_output_path}")
+    # Write G-code to Zach's path (if on Windows)
+    if zack_output_path and os.name == 'nt':  # Ensures it runs only on Windows
+        with open(zack_output_path, 'w') as file:
+            file.write("\n".join(gcode_commands))
+        print(f"G-code saved to: {zack_output_path}")
 
 if __name__ == "__main__":
     lizbeth_filepath = '/Users/lizbethjurado/Keck/Slicing Cube/STLs/I Letter Starwars v2.stl'
-    zack_filepath = 'C:\\Users\\zach\\Desktop\\SlicingCube\\TwentyMMcube.stl'
+    ## zack_filepath = 'C:\\Users\\zach\\Desktop\\SlicingCube\\TwentyMMcube.stl'
     filepath = lizbeth_filepath
     main(filepath, infill_type="1", speed=20, extrusion_rate=0.5, bead_area_formula=True)
